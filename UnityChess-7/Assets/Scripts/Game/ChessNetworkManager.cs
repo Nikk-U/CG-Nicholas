@@ -159,31 +159,9 @@ public class ChessNetworkManager : NetworkBehaviour
         EnsureMoveRelayIsActive();
         
         // Update pieces to only allow movement of own side
-        UpdatePieceControlClientRpc();
+        UpdatePieceControl();
         
         BroadcastStatus("Game started! White to move first.");
-    }
-    
-    /// <summary>
-    /// Client-side RPC to update piece controls
-    /// </summary>
-    [ClientRpc]
-    private void UpdatePieceControlClientRpc()
-    {
-        // Get the local client's side
-        Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
-        
-        // Get all visual pieces
-        VisualPiece[] allPieces = FindObjectsOfType<VisualPiece>(true);
-        
-        foreach (VisualPiece piece in allPieces)
-        {
-            // Only enable pieces for the local player's side
-            piece.enabled = piece.PieceColor == localSide;
-        }
-        
-        // Broadcast local status
-        BroadcastStatus($"Updating piece controls. Your side: {localSide}");
     }
     
     private void EnsureMoveRelayIsActive()
@@ -250,19 +228,45 @@ public class ChessNetworkManager : NetworkBehaviour
     /// </summary>
     public bool CanControlSide(Side side)
     {
+        {
+            // STRICT ROLE ENFORCEMENT - No exceptions
+            if (NetworkManager.Singleton.IsConnectedClient)
+            {
+                // Host can NEVER move black pieces under any circumstances
+                if (NetworkManager.Singleton.IsHost && side == Side.Black)
+                {
+                    Debug.LogError("HOST BLOCKED FROM MOVING BLACK PIECES");
+                    return false;
+                }
+        
+                // Client can NEVER move white pieces under any circumstances
+                if (!NetworkManager.Singleton.IsHost && side == Side.White)
+                {
+                    Debug.LogError("CLIENT BLOCKED FROM MOVING WHITE PIECES");
+                    return false;
+                }
+            }
+        }
+        
         if (!NetworkManager.Singleton.IsConnectedClient)
         {
             // In single player mode, allow all moves
             return true;
         }
         
-        // Get the local client's side
-        Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
+        // If we're the host, we can only control White
+        if (NetworkManager.Singleton.IsHost)
+        {
+            return side == Side.White;
+        }
         
-        // Only allow control of the local player's side
-        return side == localSide;
+        // If we're a client, we can only control Black
+        return side == Side.Black;
     }
     
+    /// <summary>
+    /// Updates piece controls to only allow movement of the player's side
+    /// </summary>
     /// <summary>
     /// Updates piece controls to only allow movement of the player's side
     /// </summary>
@@ -270,9 +274,38 @@ public class ChessNetworkManager : NetworkBehaviour
     {
         if (!NetworkManager.Singleton.IsConnectedClient || !isMultiplayerGameActive)
             return;
+    
+        // Get all visual pieces
+        VisualPiece[] allPieces = FindObjectsOfType<VisualPiece>(true);
+
+        foreach (VisualPiece piece in allPieces)
+        {
+            if (NetworkManager.Singleton.IsHost)
+            {
+                // Host can only move white pieces, disable black pieces
+                bool isPlayerPiece = piece.PieceColor == Side.White;
+                piece.enabled = isPlayerPiece;
         
-        // Call the client RPC to update piece controls on all clients
-        UpdatePieceControlClientRpc();
+                // Make sure interaction components are also disabled
+                if (piece.GetComponent<Collider>() != null)
+                    piece.GetComponent<Collider>().enabled = isPlayerPiece;
+            }
+            else
+            {
+                // Client can only move black pieces, disable white pieces
+                bool isPlayerPiece = piece.PieceColor == Side.Black;
+                piece.enabled = isPlayerPiece;
+        
+                // Make sure interaction components are also disabled
+                if (piece.GetComponent<Collider>() != null)
+                    piece.GetComponent<Collider>().enabled = isPlayerPiece;
+            }
+        }
+
+        if (NetworkManager.Singleton.IsHost)
+            BroadcastStatus("You are the host playing as White.");
+        else
+            BroadcastStatus("You are the client playing as Black.");
     }
     
     /// <summary>
@@ -291,4 +324,7 @@ public class ChessNetworkManager : NetworkBehaviour
         Debug.Log($"Chess Network: {message}");
         OnNetworkStatusChanged?.Invoke(message);
     }
+    
+    
+    
 }

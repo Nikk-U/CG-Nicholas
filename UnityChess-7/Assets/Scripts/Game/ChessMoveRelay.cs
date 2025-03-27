@@ -43,28 +43,6 @@ public class ChessMoveRelay : NetworkBehaviour
         VisualPiece.VisualPieceMoved -= InterceptPieceMove;
     }
 
-    public override void OnNetworkSpawn()
-    {
-        base.OnNetworkSpawn();
-        
-        // Force piece control update when this object spawns on the network
-        if (ChessNetworkManager.Instance != null)
-        {
-            // Wait one frame to make sure everything is initialized
-            StartCoroutine(DelayedPieceControlUpdate());
-        }
-    }
-    
-    private IEnumerator DelayedPieceControlUpdate()
-    {
-        yield return null; // Wait one frame
-        
-        // Update piece controls
-        ChessNetworkManager.Instance.UpdatePieceControl();
-        
-        Debug.Log("Chess Move Relay initialized and updated piece controls");
-    }
-
     /// <summary>
     /// Intercepts piece moves to synchronize them over the network
     /// </summary>
@@ -75,7 +53,7 @@ public class ChessMoveRelay : NetworkBehaviour
         if (isHandlingNetworkMove) return;
 
         // Only process if we're in a networked game
-        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient)
+        if (!NetworkManager.Singleton.IsConnectedClient || !ChessNetworkManager.Instance.IsInMultiplayerGame())
             return;
 
         // Get the moving piece's side
@@ -84,20 +62,17 @@ public class ChessMoveRelay : NetworkBehaviour
 
         Square destinationSquare = new Square(closestBoardSquareTransform.name);
 
-        // Strict check for piece movement based on host/client status
-        bool canMove = (NetworkManager.Singleton.IsHost && visualPiece.PieceColor == Side.White) ||
-                       (!NetworkManager.Singleton.IsHost && visualPiece.PieceColor == Side.Black);
-
-        if (!canMove)
+        // Check if local player is allowed to move this piece
+        if (!ChessNetworkManager.Instance.CanControlSide(visualPiece.PieceColor))
         {
             Debug.Log($"Cannot move opponent's piece from {movedPieceInitialSquare} to {destinationSquare}");
-            
-            // Reset the piece position immediately
-            movedPieceTransform.position = movedPieceTransform.parent.position;
             return;
         }
 
         Debug.Log($"Intercepted move from {movedPieceInitialSquare} to {destinationSquare}");
+
+        // Don't relay if it's an invalid local move - the GameManager will reset the piece position
+        // We let the normal VisualPiece.VisualPieceMoved event flow continue
 
         // After a short delay to allow local game logic to process, relay the move if it was valid
         StartCoroutine(DelayedMoveRelay(movedPieceInitialSquare, destinationSquare, promotionPiece));
@@ -116,9 +91,42 @@ public class ChessMoveRelay : NetworkBehaviour
             Debug.Log("Move was invalid (no piece at destination), not relaying");
             yield break;
         }
+
+        // If move was successful, relay it
+        if (promotionPiece == null)
+        {
+            RelayValidatedMoveServerRpc(
+                startSquare.File,
+                startSquare.Rank,
+                endSquare.File,
+                endSquare.Rank
+            );
+        }
+        else
+        {
+            int promotionType = GetPromotionPieceType(promotionPiece);
+            RelayValidatedPromotionServerRpc(
+                startSquare.File,
+                startSquare.Rank,
+                endSquare.File,
+                endSquare.Rank,
+                promotionType
+            );
+        }
     }
 
-    
+    /// <summary>
+    /// Determines the promotion piece type as an integer
+    /// </summary>
+    private int GetPromotionPieceType(Piece promotionPiece)
+    {
+        if (promotionPiece is Queen) return (int)ElectedPiece.Queen;
+        if (promotionPiece is Rook) return (int)ElectedPiece.Rook;
+        if (promotionPiece is Bishop) return (int)ElectedPiece.Bishop;
+        if (promotionPiece is Knight) return (int)ElectedPiece.Knight;
+        return (int)ElectedPiece.Queen; // Default
+    }
+
     /// <summary>
     /// Sends a move from client to server AFTER local validation
     /// </summary>
@@ -162,7 +170,7 @@ public class ChessMoveRelay : NetworkBehaviour
         Debug.Log($"Server received validated promotion: {startFile},{startRank} to {endFile},{endRank}, choice: {promotionChoice}");
 
         // Broadcast to all clients except the one that sent it
-        RelayValidatedPromotionClientRpc(startFile, startRank, endFile, endRank, promotionChoice, NetworkManager.Singleton.LocalClientId);
+        RelayValidatedPromotionClientRpc(startFile, startRank, endFile, endRank, promotionChoice, NetworkManager.LocalClientId);
     }
 
     /// <summary>
