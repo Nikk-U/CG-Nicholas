@@ -46,11 +46,11 @@ public class ChessNetworkManager : NetworkBehaviour
         {
             NetworkManager.Singleton.OnClientConnectedCallback += OnClientConnected;
             NetworkManager.Singleton.OnClientDisconnectCallback += OnClientDisconnect;
-            BroadcastStatus("Chess Network Manager ready");
+            BroadcastStatus("NETWORK INIT: Chess Network Manager initialized and ready");
         }
         else
         {
-            Debug.LogError("NetworkManager.Singleton is null in ChessNetworkManager Start");
+            Debug.Log("INIT MESSAGE: NetworkManager.Singleton is null during initialization");
         }
     }
     
@@ -72,8 +72,8 @@ public class ChessNetworkManager : NetworkBehaviour
         if (NetworkManager.Singleton.IsHost)
         {
             playerSides[NetworkManager.Singleton.LocalClientId] = Side.White;
-            Debug.Log("Host initialized as White");
-            BroadcastStatus("Game hosted. You are playing as White.");
+            Debug.Log("HOST SETUP: Host player initialized with White pieces");
+            BroadcastStatus("GAME CREATED: You are hosting the game as White");
         }
     }
     
@@ -82,7 +82,7 @@ public class ChessNetworkManager : NetworkBehaviour
     /// </summary>
     private void OnClientConnected(ulong clientId)
     {
-        Debug.Log($"Client connected: {clientId}");
+        Debug.Log($"CONNECTION ALERT: Client {clientId} has connected to the game");
         
         // If the connecting player is not the host, assign them to the black side
         if (clientId != NetworkManager.Singleton.LocalClientId && NetworkManager.Singleton.IsHost)
@@ -92,7 +92,7 @@ public class ChessNetworkManager : NetworkBehaviour
             lastConnectedClientId = clientId;
             
             // Inform the host that a client joined
-            BroadcastStatus($"Client {clientId} connected and assigned to Black");
+            BroadcastStatus($"PLAYER JOINED: Client {clientId} connected and assigned to Black side");
             
             // Tell the client they are the black side
             AssignPlayerSideClientRpc(clientId, (int)Side.Black);
@@ -107,16 +107,16 @@ public class ChessNetworkManager : NetworkBehaviour
     /// </summary>
     private void OnClientDisconnect(ulong clientId)
     {
-        Debug.Log($"Client disconnected: {clientId}");
+        Debug.Log($"DISCONNECT NOTICE: Client {clientId} has disconnected from the game");
         
         // Don't remove the client from playerSides to preserve their side when they rejoin
         if (NetworkManager.Singleton.IsHost)
         {
-            BroadcastStatus($"Client {clientId} disconnected. Their side (Black) is reserved for reconnection.");
+            BroadcastStatus($"OPPONENT LEFT: Client {clientId} disconnected. Their position as Black is reserved for reconnection");
         }
         else if (clientId == NetworkManager.Singleton.LocalClientId)
         {
-            BroadcastStatus("You were disconnected from the server.");
+            BroadcastStatus("CONNECTION LOST: You were disconnected from the host server");
         }
     }
     
@@ -129,13 +129,13 @@ public class ChessNetworkManager : NetworkBehaviour
         if (NetworkManager.Singleton.LocalClientId == clientId)
         {
             Side assignedSide = (Side)sideValue;
-            Debug.Log($"I've been assigned side: {assignedSide}");
+            Debug.Log($"ROLE ASSIGNMENT: Local player assigned to {assignedSide} side");
             
             // Add this client to the local players dictionary
             playerSides[clientId] = assignedSide;
             
             // Update the UI
-            BroadcastStatus($"You are playing as {assignedSide}. Waiting for game to start.");
+            BroadcastStatus($"SIDE CONFIRMED: You will be playing as {assignedSide}. Waiting for game to begin");
         }
     }
     
@@ -146,13 +146,13 @@ public class ChessNetworkManager : NetworkBehaviour
     private void StartGameClientRpc()
     {
         isMultiplayerGameActive = true;
-        Debug.Log("Game starting!");
+        Debug.Log("GAME LAUNCH: Multiplayer chess match is now starting");
         
         // Tell the GameManager to start a new game if it exists
         if (GameManager.Instance != null)
         {
             GameManager.Instance.StartNewGame();
-            Debug.Log("New game started via GameManager");
+            Debug.Log("BOARD SETUP: New chess game initialized via GameManager");
         }
         
         // Make sure ChessMoveRelay is active
@@ -161,18 +161,18 @@ public class ChessNetworkManager : NetworkBehaviour
         // Update pieces to only allow movement of own side
         UpdatePieceControl();
         
-        BroadcastStatus("Game started! White to move first.");
+        BroadcastStatus("MATCH STARTED: Game is now in progress. White moves first");
     }
     
     private void EnsureMoveRelayIsActive()
     {
         // Find or create the ChessMoveRelay
-        ChessMoveRelay relay = FindObjectOfType<ChessMoveRelay>();
+        ChessRelay relay = FindObjectOfType<ChessRelay>();
         if (relay == null)
         {
-            Debug.Log("Creating new ChessMoveRelay GameObject");
+            Debug.Log("RELAY CREATION: Setting up new ChessMoveRelay for network synchronization");
             GameObject relayObj = new GameObject("ChessMoveRelay");
-            relay = relayObj.AddComponent<ChessMoveRelay>();
+            relay = relayObj.AddComponent<ChessRelay>();
             
             // Assign the board reference
             GameObject board = GameObject.FindGameObjectWithTag("Board");
@@ -188,12 +188,12 @@ public class ChessNetworkManager : NetworkBehaviour
             if (NetworkManager.Singleton.IsServer && !netObj.IsSpawned)
             {
                 netObj.Spawn();
-                Debug.Log("ChessMoveRelay spawned successfully");
+                Debug.Log("RELAY ACTIVATED: ChessMoveRelay successfully spawned on network");
             }
         }
         else
         {
-            Debug.Log("ChessMoveRelay already exists");
+            Debug.Log("RELAY FOUND: Using existing ChessMoveRelay for network communication");
         }
     }
     
@@ -235,14 +235,14 @@ public class ChessNetworkManager : NetworkBehaviour
                 // Host can NEVER move black pieces under any circumstances
                 if (NetworkManager.Singleton.IsHost && side == Side.Black)
                 {
-                    Debug.LogError("HOST BLOCKED FROM MOVING BLACK PIECES");
+                    Debug.Log("SECURITY NOTE: Host attempted to control Black pieces");
                     return false;
                 }
         
                 // Client can NEVER move white pieces under any circumstances
                 if (!NetworkManager.Singleton.IsHost && side == Side.White)
                 {
-                    Debug.LogError("CLIENT BLOCKED FROM MOVING WHITE PIECES");
+                    Debug.Log("SECURITY NOTE: Client attempted to control White pieces");
                     return false;
                 }
             }
@@ -264,9 +264,6 @@ public class ChessNetworkManager : NetworkBehaviour
         return side == Side.Black;
     }
     
-    /// <summary>
-    /// Updates piece controls to only allow movement of the player's side
-    /// </summary>
     /// <summary>
     /// Updates piece controls to only allow movement of the player's side
     /// </summary>
@@ -303,9 +300,9 @@ public class ChessNetworkManager : NetworkBehaviour
         }
 
         if (NetworkManager.Singleton.IsHost)
-            BroadcastStatus("You are the host playing as White.");
+            BroadcastStatus("CONTROL ENABLED: You are the host playing as White");
         else
-            BroadcastStatus("You are the client playing as Black.");
+            BroadcastStatus("CONTROL ENABLED: You are the client playing as Black");
     }
     
     /// <summary>
@@ -321,10 +318,7 @@ public class ChessNetworkManager : NetworkBehaviour
     /// </summary>
     public void BroadcastStatus(string message)
     {
-        Debug.Log($"Chess Network: {message}");
+        Debug.Log($"NETWORK STATUS: {message}");
         OnNetworkStatusChanged?.Invoke(message);
     }
-    
-    
-    
 }

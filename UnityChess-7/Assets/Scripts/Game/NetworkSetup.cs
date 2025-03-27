@@ -17,7 +17,7 @@ public class NetworkSetup : MonoBehaviour
 
     private void SetupMinimalNetworking()
     {
-        Debug.Log("Setting up minimal networking for the chess game");
+        Debug.Log("NETWORK BOOTSTRAP: Initializing minimal networking architecture for chess game");
 
         // Find chessBoard if not assigned
         if (chessBoard == null)
@@ -32,13 +32,14 @@ public class NetworkSetup : MonoBehaviour
 
         if (chessBoard != null)
         {
-            Debug.Log("Found chess board, configuring for networking");
+            Debug.Log("BOARD LOCATED: Chess board successfully identified for network configuration");
 
             // Ensure the board itself has a NetworkObject
             if (chessBoard.GetComponent<NetworkObject>() == null)
             {
                 NetworkObject boardNetObj = chessBoard.AddComponent<NetworkObject>();
                 boardNetObj.DontDestroyWithOwner = true;
+                Debug.Log("COMPONENT ADDED: NetworkObject attached to chess board with persistence enabled");
             }
 
             // DO NOT add NetworkObjects to individual squares as it causes conflicts
@@ -48,21 +49,27 @@ public class NetworkSetup : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("Chess board reference not assigned or found in NetworkSetup");
+            Debug.LogWarning("REFERENCE MISSING: Unable to locate chess board for network setup");
         }
     }
 
     private void SetupChessMoveRelay()
     {
         // Find or create ChessMoveRelay
-        ChessMoveRelay relay = FindObjectOfType<ChessMoveRelay>();
+        ChessRelay relay = FindObjectOfType<ChessRelay>();
         if (relay == null)
         {
             GameObject relayObj = new GameObject("ChessMoveRelay");
-            relay = relayObj.AddComponent<ChessMoveRelay>();
+            relay = relayObj.AddComponent<ChessRelay>();
+            Debug.Log("RELAY CREATED: New ChessRelay instance generated for move synchronization");
 
             // Set the chess board reference
             relay.gameObject.AddComponent<NetworkObject>();
+            Debug.Log("RELAY CONFIGURED: NetworkObject component attached to ChessRelay");
+        }
+        else
+        {
+            Debug.Log("RELAY DETECTED: Using existing ChessRelay for network communication");
         }
     }
 }
