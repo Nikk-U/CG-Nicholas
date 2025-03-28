@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityChess;
 using UnityEngine;
 using static UnityChess.SquareUtil;
+using Unity.Netcode;
 
 /// <summary>
 /// Manages the visual representation of the chess board and piece placement.
@@ -66,16 +67,31 @@ public class BoardManager : MonoBehaviourSingleton<BoardManager> {
 	/// Called when a new game is started.
 	/// Clears the board and places pieces according to the new game state.
 	/// </summary>
+	/// <summary>
+	/// Called when a new game is started.
+	/// Clears the board and places pieces according to the new game state.
+	/// </summary>
 	private void OnNewGameStarted() {
-		// Remove all existing visual pieces.
+		// CRITICAL FIX: Skip board reset for host during reconnection
+		if (NetworkManager.Singleton != null && 
+		    NetworkManager.Singleton.IsHost && 
+		    SimpleUIController.WasHostBeforeDisconnect && 
+		    GetComponentsInChildren<VisualPiece>(true).Length > 0)
+		{
+			Debug.Log("BOARD MANAGER: Host reconnection detected - PRESERVING CURRENT BOARD STATE");
+			return;
+		}
+    
+		// Original logic - only for normal game start or client reconnection
+		// Remove all existing visual pieces
 		ClearBoard();
-		
-		// Iterate through all current pieces and create their GameObjects at the correct positions.
+    
+		// Iterate through all current pieces and create their GameObjects at the correct positions
 		foreach ((Square square, Piece piece) in GameManager.Instance.CurrentPieces) {
 			CreateAndPlacePieceGO(piece, square);
 		}
 
-		// Enable only the pieces that belong to the side whose turn it is.
+		// Enable only the pieces that belong to the side whose turn it is
 		EnsureOnlyPiecesOfSideAreEnabled(GameManager.Instance.SideToMove);
 	}
 
@@ -83,7 +99,7 @@ public class BoardManager : MonoBehaviourSingleton<BoardManager> {
 	/// Called when the game is reset to a specific half-move.
 	/// Reconstructs the board to match the game state at that half-move.
 	/// </summary>
-	private void OnGameResetToHalfMove() {
+	public void OnGameResetToHalfMove() {
 		// Clear the current board visuals.
 		ClearBoard();
 

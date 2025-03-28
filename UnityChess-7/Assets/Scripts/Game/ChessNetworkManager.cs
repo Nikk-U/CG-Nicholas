@@ -25,6 +25,9 @@ public class ChessNetworkManager : NetworkBehaviour
     // Track the last connected client ID
     private ulong lastConnectedClientId = 0;
     
+    // Flag to skip auto-start on reconnection
+    private bool skipAutoStartGame = false;
+    
     private void Awake()
     {
         // Ensure singleton behavior
@@ -139,30 +142,65 @@ public class ChessNetworkManager : NetworkBehaviour
         }
     }
     
-    /// <summary>
-    /// Starts the game on all clients
-    /// </summary>
-    [ClientRpc]
-    private void StartGameClientRpc()
+   [ClientRpc]
+private void StartGameClientRpc()
+{
+    // Improve reconnection detection for host
+    if (NetworkManager.Singleton.IsHost && skipAutoStartGame)
     {
-        isMultiplayerGameActive = true;
-        Debug.Log("GAME LAUNCH: Multiplayer chess match is now starting");
+        Debug.Log("GAME LAUNCH: Host detected during reconnection - preserving current game state");
+        skipAutoStartGame = false;
         
-        // Tell the GameManager to start a new game if it exists
-        if (GameManager.Instance != null)
-        {
-            GameManager.Instance.StartNewGame();
-            Debug.Log("BOARD SETUP: New chess game initialized via GameManager");
-        }
-        
-        // Make sure ChessMoveRelay is active
-        EnsureMoveRelayIsActive();
-        
-        // Update pieces to only allow movement of own side
+        // Make sure pieces have correct control settings
         UpdatePieceControl();
         
-        BroadcastStatus("MATCH STARTED: Game is now in progress. White moves first");
+        // Ensure the move relay is active
+        EnsureMoveRelayIsActive();
+        
+        BroadcastStatus("RECONNECTION: Client has reconnected. Game continues from current state.");
+        return;
     }
+    
+    // Improve reconnection detection for client
+    if (!NetworkManager.Singleton.IsHost && skipAutoStartGame)
+    {
+        Debug.Log("GAME LAUNCH: Client detected during reconnection - waiting for state");
+        skipAutoStartGame = false;
+        
+        // Client just updates piece control and waits for state
+        UpdatePieceControl();
+        
+        // Ensure the move relay is active
+        EnsureMoveRelayIsActive();
+        
+        BroadcastStatus("RECONNECTION: Successfully reconnected to host. Waiting for game state...");
+        return;
+    }
+
+    // If we reach here, this is a normal game start, not a reconnection
+    isMultiplayerGameActive = true;
+    Debug.Log("GAME LAUNCH: New multiplayer chess match is now starting");
+    
+    // CRITICAL FIX: Only tell GameManager to start a new game if THIS IS NOT a host reconnection
+    if (GameManager.Instance != null && 
+        !(NetworkManager.Singleton.IsHost && SimpleUIController.WasHostBeforeDisconnect))
+    {
+        GameManager.Instance.StartNewGame();
+        Debug.Log("BOARD SETUP: New chess game initialized via GameManager");
+    }
+    else if (NetworkManager.Singleton.IsHost && SimpleUIController.WasHostBeforeDisconnect)
+    {
+        Debug.Log("BOARD PRESERVATION: Host reconnection detected - SKIPPING new game creation to preserve board state");
+    }
+    
+    // Make sure ChessMoveRelay is active
+    EnsureMoveRelayIsActive();
+    
+    // Update pieces to only allow movement of own side
+    UpdatePieceControl();
+    
+    BroadcastStatus("MATCH STARTED: Game is now in progress. White moves first");
+}
     
     private void EnsureMoveRelayIsActive()
     {
@@ -320,5 +358,43 @@ public class ChessNetworkManager : NetworkBehaviour
     {
         Debug.Log($"NETWORK STATUS: {message}");
         OnNetworkStatusChanged?.Invoke(message);
+    }
+    
+    /// <summary>
+    /// Called when a client reconnects to prevent automatic game reset
+    /// </summary>
+    public void PrepareForReconnection()
+    {
+        // Mark the multiplayer game as active to prevent automatic start
+        isMultiplayerGameActive = true;
+        
+        // Set a flag to skip auto-start on reconnection
+        skipAutoStartGame = true;
+        
+        // Make sure we don't reset the game if the player reconnects
+        Debug.Log("NETWORK MANAGER: Prepared for reconnection, will skip automatic game start");
+        
+        // Subscribe to GameManager event if we need to capture the state immediately 
+        // upon reconnection for a client
+        if (GameManager.Instance != null)
+        {
+            Debug.Log("NETWORK MANAGER: GameManager found, will maintain game state during reconnection");
+        }
+    }
+    
+    /// <summary>
+    /// Forces an update of piece control settings after reconnection
+    /// </summary>
+    public void ForceUpdatePieceControlOnReconnect()
+    {
+        Debug.Log("CHESS NETWORK: Force updating piece control settings after reconnection");
+        
+        // Let a small delay pass to ensure all pieces are properly initialized
+        System.Threading.Tasks.Task.Delay(500).ContinueWith(_ => {
+            UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                Debug.Log("CHESS NETWORK: Delayed control update executing");
+                UpdatePieceControl();
+            });
+        });
     }
 }

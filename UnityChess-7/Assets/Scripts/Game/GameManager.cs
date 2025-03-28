@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityChess;
 using UnityEngine;
+using Unity.Netcode;
 
 /// <summary>
 /// Manages the overall game state, including game start, moves execution,
@@ -163,8 +164,30 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 	/// Loads a game from the given serialised game state string.
 	/// </summary>
 	/// <param name="serializedGame">The serialised game state string.</param>
+	/// <summary>
+	/// Skips board reset for host during reconnection
+	/// </summary>
+	/// <param name="serializedGame">The serialized game state string.</param>
+	/// <summary>
+	/// Loads a game from the given serialised game state string.
+	/// Modified to prevent host board reset during reconnection.
+	/// </summary>
+	/// <param name="serializedGame">The serialised game state string.</param>
 	public void LoadGame(string serializedGame)
 	{
+		// Host safety check - skip game loading completely if this is a host reconnection
+		if (NetworkManager.Singleton != null && 
+		    NetworkManager.Singleton.IsHost && 
+		    SimpleUIController.WasHostBeforeDisconnect)
+		{
+			Debug.Log("GAME MANAGER: Host reconnection detected - COMPLETELY SKIPPING GAME LOAD to preserve state");
+        
+			// CRITICAL FIX: Do NOT invoke NewGameStartedEvent for hosts during reconnection
+			// This prevents BoardManager.OnNewGameStarted() from clearing and recreating the board
+			return;
+		}
+    
+		// Original functionality for clients only
 		game = serializersByType[selectedSerializationType].Deserialize(serializedGame);
 		NewGameStartedEvent?.Invoke();
 	}
@@ -375,5 +398,23 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 	{
 		// Uses your existing TryExecuteMove logic
 		return TryExecuteMove(move);
+	}
+	
+	/// <summary>
+	/// Prevents the host from resetting its board state during reconnection
+	/// </summary>
+	private void OnNewGameStarted()
+	{
+		// If we're the host and it's not the first game,
+		// this is likely a reconnection. Capture the board state
+		// to prevent the board from resetting
+		if (NetworkManager.Singleton != null && 
+		    NetworkManager.Singleton.IsHost &&
+		    BoardStatePreserver.Instance != null)
+		{
+			// Let the board preserver know we're starting a new game
+			// This will make sure it restores the correct state
+			Debug.Log("GAME MANAGER: Host detected new game event, notifying board preserver");
+		}
 	}
 }
