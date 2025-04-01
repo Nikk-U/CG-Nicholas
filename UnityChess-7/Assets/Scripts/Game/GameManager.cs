@@ -213,6 +213,11 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 	/// </summary>
 	/// <param name="move">The move to execute.</param>
 	/// <returns>True if the move was successfully executed; otherwise, false.</returns>
+	/// <summary>
+	/// Attempts to execute a given move in the game.
+	/// </summary>
+	/// <param name="move">The move to execute.</param>
+	/// <returns>True if the move was successfully executed; otherwise, false.</returns>
 	private bool TryExecuteMove(Movement move)
 	{
 		// Attempt to execute the move within the game logic.
@@ -229,6 +234,26 @@ public class GameManager : MonoBehaviourSingleton<GameManager>
 		{
 			BoardManager.Instance.SetActiveAllPieces(false);
 			GameEndedEvent?.Invoke();
+        
+			// Notify the network manager about game end if in a networked game
+			if (ChessNetworkManager.Instance != null && NetworkManager.Singleton != null && NetworkManager.Singleton.IsConnectedClient)
+			{
+				if (latestHalfMove.CausedCheckmate)
+				{
+					// The side that just moved wins by checkmate
+					ChessNetworkManager.Instance.HandleGameEnd(
+						ChessNetworkManager.GameEndReason.Checkmate, 
+						latestHalfMove.Piece.Owner
+					);
+				}
+				else if (latestHalfMove.CausedStalemate)
+				{
+					// Stalemate is a draw
+					ChessNetworkManager.Instance.HandleGameEnd(
+						ChessNetworkManager.GameEndReason.Stalemate
+					);
+				}
+			}
 		}
 		else
 		{

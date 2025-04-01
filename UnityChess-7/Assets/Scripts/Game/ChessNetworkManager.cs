@@ -11,7 +11,7 @@ public class ChessNetworkManager : NetworkBehaviour
 {
     // Singleton instance
     public static ChessNetworkManager Instance { get; private set; }
-    
+    public bool PlayerIsLeavingVoluntarily { get; set; } = false;
     // Network status event that UI can subscribe to
     public delegate void NetworkStatusEvent(string status);
     public static event NetworkStatusEvent OnNetworkStatusChanged;
@@ -108,14 +108,42 @@ public class ChessNetworkManager : NetworkBehaviour
     /// <summary>
     /// Called when a client disconnects from the network
     /// </summary>
+    /// <summary>
+    /// Called when a client disconnects from the network
+    /// </summary>
     private void OnClientDisconnect(ulong clientId)
     {
         Debug.Log($"DISCONNECT NOTICE: Client {clientId} has disconnected from the game");
-        
+    
+        bool isVoluntaryLeave = PlayerIsLeavingVoluntarily;
+    
+        // Reset the flag immediately after checking it
+        PlayerIsLeavingVoluntarily = false;
+    
         // Don't remove the client from playerSides to preserve their side when they rejoin
         if (NetworkManager.Singleton.IsHost)
         {
-            BroadcastStatus($"OPPONENT LEFT: Client {clientId} disconnected. Their position as Black is reserved for reconnection");
+            if (isVoluntaryLeave)
+            {
+                // This was a voluntary leave - don't treat as resignation
+                BroadcastStatus($"OPPONENT LEFT: Client {clientId} left the game voluntarily.");
+            }
+            else 
+            {
+                BroadcastStatus($"OPPONENT LEFT: Client {clientId} disconnected. Their position as Black is reserved for reconnection");
+            
+                // Only treat as resignation if not a voluntary leave
+                // If we're in an active game and the client (not host) disconnects, treat as resignation
+                if (isMultiplayerGameActive && clientId != NetworkManager.Singleton.LocalClientId)
+                {
+                    // Get the disconnected player's side (should be Black if client)
+                    Side disconnectedSide = GetPlayerSide(clientId);
+                    Side winningSide = disconnectedSide == Side.White ? Side.Black : Side.White;
+                
+                    // Notify all clients of the disconnection win
+                    NotifyGameEndClientRpc((int)GameEndReason.Disconnection, (int)winningSide);
+                }
+            }
         }
         else if (clientId == NetworkManager.Singleton.LocalClientId)
         {
@@ -143,23 +171,29 @@ public class ChessNetworkManager : NetworkBehaviour
     }
     
    [ClientRpc]
-private void StartGameClientRpc()
-{
-    // Improve reconnection detection for host
-    if (NetworkManager.Singleton.IsHost && skipAutoStartGame)
-    {
-        Debug.Log("GAME LAUNCH: Host detected during reconnection - preserving current game state");
-        skipAutoStartGame = false;
+   private void StartGameClientRpc()
+   {
+       // Clear any win/lose messages at the start of a new game
+       if (UIManager.Instance != null && UIManager.Instance.resultText != null)
+       {
+           UIManager.Instance.resultText.gameObject.SetActive(false);
+       }
+    
+       // Improve reconnection detection for host
+       if (NetworkManager.Singleton.IsHost && skipAutoStartGame)
+       {
+           Debug.Log("GAME LAUNCH: Host detected during reconnection - preserving current game state");
+           skipAutoStartGame = false;
         
-        // Make sure pieces have correct control settings
-        UpdatePieceControl();
+           // Make sure pieces have correct control settings
+           UpdatePieceControl();
         
-        // Ensure the move relay is active
-        EnsureMoveRelayIsActive();
+           // Ensure the move relay is active
+           EnsureMoveRelayIsActive();
         
-        BroadcastStatus("RECONNECTION: Client has reconnected. Game continues from current state.");
-        return;
-    }
+           BroadcastStatus("RECONNECTION: Client has reconnected. Game continues from current state.");
+           return;
+       }
     
     // Improve reconnection detection for client
     if (!NetworkManager.Singleton.IsHost && skipAutoStartGame)
@@ -397,4 +431,140 @@ private void StartGameClientRpc()
             });
         });
     }
+    
+    // Add these methods to your ChessNetworkManager.cs file
+
+/// <summary>
+/// Handles game end conditions and notifies all clients
+/// </summary>
+public void HandleGameEnd(GameEndReason reason, Side winningSide = Side.None)
+{
+    if (NetworkManager.Singleton.IsServer || NetworkManager.Singleton.IsHost)
+    {
+        Debug.Log($"GAME END: Game ended due to {reason}, winner: {winningSide}");
+        
+        // Notify all clients about the game outcome
+        NotifyGameEndClientRpc((int)reason, (int)winningSide);
+        
+        // Set a flag to prevent further moves
+        isMultiplayerGameActive = false;
+    }
+}
+
+/// <summary>
+/// Called when a client disconnects to handle it as a potential resignation
+/// </summary>
+private void HandleDisconnectionAsResignation(ulong clientId)
+{
+    // Only process this if we're in an active game
+    if (!isMultiplayerGameActive) return;
+    
+    // Determine which side resigned based on who disconnected
+    if (clientId == NetworkManager.Singleton.LocalClientId)
+    {
+        // Local player disconnected - handled by the other player's instance
+        return;
+    }
+    
+    // Get the side of the disconnected player
+    Side disconnectedSide = GetPlayerSide(clientId);
+    
+    if (disconnectedSide != Side.None)
+    {
+        // The disconnected player's side loses, the other side wins
+        Side winningSide = disconnectedSide == Side.White ? Side.Black : Side.White;
+        
+        Debug.Log($"RESIGNATION: Player {clientId} with side {disconnectedSide} has disconnected, treating as resignation");
+        
+        // Handle as a resignation
+        HandleGameEnd(GameEndReason.Resignation, winningSide);
+    }
+}
+
+/// <summary>
+/// Sends game end notification to all clients
+/// </summary>
+[ClientRpc]
+public void NotifyGameEndClientRpc(int reasonValue, int winningSideValue)
+{
+    GameEndReason reason = (GameEndReason)reasonValue;
+    Side winningSide = (Side)winningSideValue;
+    
+    Debug.Log($"GAME END NOTIFICATION: Game ended due to {reason}, winner: {winningSide}");
+    
+    // Display appropriate message in UI
+    string endMessage = "";
+    
+    switch (reason)
+    {
+        case GameEndReason.Checkmate:
+            endMessage = $"{winningSide} Wins by Checkmate!";
+            break;
+        case GameEndReason.Stalemate:
+            endMessage = "Game Drawn by Stalemate!";
+            break;
+        case GameEndReason.Resignation:
+            endMessage = $"{winningSide} Wins by Resignation!";
+            break;
+        case GameEndReason.Disconnection:
+            endMessage = $"{winningSide} Wins by Disconnection!";
+            break;
+    }
+    
+    // Update the UI
+    if (UIManager.Instance != null)
+    {
+        UIManager.Instance.ShowGameEndMessage(endMessage);
+    }
+    
+    // Broadcast status message
+    BroadcastStatus($"GAME OVER: {endMessage}");
+    
+    // Disable all piece interaction
+    if (BoardManager.Instance != null)
+    {
+        BoardManager.Instance.SetActiveAllPieces(false);
+    }
+}
+
+/// <summary>
+/// Call this method to handle resignation when a player clicks a resign button
+/// </summary>
+public void ResignGame()
+{
+    if (!isMultiplayerGameActive) return;
+    
+    // Get the side of the local player
+    Side localSide = GetPlayerSide(NetworkManager.Singleton.LocalClientId);
+    
+    // The other side wins
+    Side winningSide = localSide == Side.White ? Side.Black : Side.White;
+    
+    Debug.Log($"RESIGNATION: Local player with side {localSide} has resigned");
+    
+    // Notify the server of resignation
+    ResignGameServerRpc(NetworkManager.Singleton.LocalClientId);
+}
+
+/// <summary>
+/// Server RPC to handle resignation
+/// </summary>
+[ServerRpc(RequireOwnership = false)]
+private void ResignGameServerRpc(ulong resigningClientId)
+{
+    Side resigningSide = GetPlayerSide(resigningClientId);
+    Side winningSide = resigningSide == Side.White ? Side.Black : Side.White;
+    
+    // Handle as a resignation
+    HandleGameEnd(GameEndReason.Resignation, winningSide);
+}
+
+// Add this enum to define game end reasons
+public enum GameEndReason
+{
+    Checkmate,
+    Stalemate,
+    Resignation,
+    Disconnection
+}
 }

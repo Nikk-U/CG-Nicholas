@@ -13,7 +13,7 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 	// Reference to the promotion UI panel.
 	[SerializeField] private GameObject promotionUI = null;
 	// Text element to display game result messages (e.g. win, draw).
-	[SerializeField] private Text resultText = null;
+	[SerializeField] public Text resultText = null;
 	// Input field to display and edit the serialized game state string.
 	[SerializeField] private InputField GameStringInputField = null;
 	// Indicator image for White's turn.
@@ -76,12 +76,12 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 		UpdateGameStringInputField();
 		// Validate turn indicator images.
 		ValidateIndicators();
-		
+    
 		// Clear all child GameObjects under the move history parent.
 		for (int i = 0; i < moveHistoryContentParent.transform.childCount; i++) {
 			Destroy(moveHistoryContentParent.transform.GetChild(i).gameObject);
 		}
-		
+    
 		// Clear the move UI timeline.
 		moveUITimeline.Clear();
 
@@ -286,6 +286,27 @@ public class UIManager : MonoBehaviourSingleton<UIManager> {
 		whiteTurnIndicator.enabled = sideToMove == Side.White;
 		// Enable the Black turn indicator if it is Black's turn.
 		blackTurnIndicator.enabled = sideToMove == Side.Black;
+	}
+	/// <summary>
+	/// Displays a game end message in the UI
+	/// </summary>
+	/// <param name="message">The message to display</param>
+	public void ShowGameEndMessage(string message)
+	{
+		// Display the result text
+		if (resultText != null)
+		{
+			resultText.text = message;
+			resultText.gameObject.SetActive(true);
+		}
+	}
+	
+	public void HideGameEndMessage()
+	{
+		if (resultText != null)
+		{
+			resultText.gameObject.SetActive(false);
+		}
 	}
 
 	/// <summary>

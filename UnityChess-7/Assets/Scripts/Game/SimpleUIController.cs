@@ -6,6 +6,7 @@ using System.Collections;
 
 /// <summary>
 /// Simplified UI controller with just the basic connection buttons
+/// Enhanced with turn management capabilities
 /// </summary>
 public class SimpleUIController : MonoBehaviour
 {
@@ -14,6 +15,8 @@ public class SimpleUIController : MonoBehaviour
     [SerializeField] private Button clientButton;
     [SerializeField] private Button rejoinButton;
     [SerializeField] private Button leaveButton;
+    [Header("Game Control")]
+    [SerializeField] private Button resignButton;
     
     [Header("Status")]
     [SerializeField] private Text statusText;
@@ -36,6 +39,9 @@ public class SimpleUIController : MonoBehaviour
     // Flag to indicate the game should skip GameManager.LoadGame
     private bool skipStateRestoration = false;
     
+    // Flag to control turn notifications
+    private bool isTurnNotificationEnabled = true;
+    
     private void Start()
     {
         // Set button listeners
@@ -50,6 +56,10 @@ public class SimpleUIController : MonoBehaviour
             
         if (leaveButton != null)
             leaveButton.onClick.AddListener(OnLeaveClicked);
+        
+        if (resignButton != null)
+            resignButton.onClick.AddListener(OnResignClicked);
+
             
         // Initialize button states
         UpdateButtonStates(false);
@@ -63,6 +73,13 @@ public class SimpleUIController : MonoBehaviour
         // Subscribe to game events to capture the game state
         GameManager.MoveExecutedEvent += OnMoveExecuted;
         
+        // Subscribe to GameManager events for turn notifications
+        if (GameManager.Instance != null)
+        {
+            GameManager.MoveExecutedEvent += OnMoveExecutedForTurnUpdate;
+            GameManager.NewGameStartedEvent += OnNewGameStartedForTurnUpdate;
+        }
+        
         // Initialize static flag
         WasHostBeforeDisconnect = false;
     }
@@ -74,6 +91,13 @@ public class SimpleUIController : MonoBehaviour
         
         // Unsubscribe from game events
         GameManager.MoveExecutedEvent -= OnMoveExecuted;
+        
+        // Unsubscribe from GameManager events for turn notifications
+        if (GameManager.Instance != null)
+        {
+            GameManager.MoveExecutedEvent -= OnMoveExecutedForTurnUpdate;
+            GameManager.NewGameStartedEvent -= OnNewGameStartedForTurnUpdate;
+        }
         
         // Stop any active coroutines
         if (stateRestorationCoroutine != null)
@@ -91,6 +115,72 @@ public class SimpleUIController : MonoBehaviour
         {
             CaptureCurrentGameState();
         }
+    }
+    
+    /// <summary>
+    /// Handle the move executed event for turn updates
+    /// </summary>
+    private void OnMoveExecutedForTurnUpdate()
+    {
+        if (!isTurnNotificationEnabled || GameManager.Instance == null) 
+            return;
+            
+        // Get the current side to move
+        Side currentSide = GameManager.Instance.SideToMove;
+        
+        // Update the UI with turn notification
+        UpdateTurnNotification(currentSide);
+    }
+    
+    /// <summary>
+    /// Handle new game started for turn reset
+    /// </summary>
+    private void OnNewGameStartedForTurnUpdate()
+    {
+        if (!isTurnNotificationEnabled)
+            return;
+            
+        // Chess always starts with White
+        UpdateTurnNotification(Side.White);
+    }
+    
+    /// <summary>
+    /// Update the status text with turn notification
+    /// </summary>
+    private void UpdateTurnNotification(Side sideToMove)
+    {
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient)
+            return;
+            
+        string turnMessage;
+        
+        if (NetworkManager.Singleton.IsHost)
+        {
+            // Host plays as White
+            if (sideToMove == Side.White)
+            {
+                turnMessage = "YOUR TURN: White to move (You)";
+            }
+            else
+            {
+                turnMessage = "WAITING: Black to move (Opponent)";
+            }
+        }
+        else
+        {
+            // Client plays as Black
+            if (sideToMove == Side.Black)
+            {
+                turnMessage = "YOUR TURN: Black to move (You)";
+            }
+            else
+            {
+                turnMessage = "WAITING: White to move (Opponent)";
+            }
+        }
+        
+        // Use your existing UpdateStatus method to show the message
+        UpdateStatus(turnMessage);
     }
     
     private void CaptureCurrentGameState()
@@ -329,36 +419,49 @@ public class SimpleUIController : MonoBehaviour
     private void OnLeaveClicked()
     {
         Debug.Log("Leave button clicked");
-        
+    
         if (NetworkManager.Singleton == null)
         {
             UpdateStatus("Error: NetworkManager not found");
             return;
         }
-        
+    
+        // Set a flag to indicate this is a voluntary leave, not a disconnection
+        if (ChessNetworkManager.Instance != null)
+        {
+            ChessNetworkManager.Instance.PlayerIsLeavingVoluntarily = true;
+        }
+    
         // Remember if we were the host before disconnecting
         WasHostBeforeDisconnect = NetworkManager.Singleton.IsHost;
         Debug.Log($"UI: Saving host status before disconnect: {WasHostBeforeDisconnect}");
-        
+    
         // Stop any active restoration
         if (stateRestorationCoroutine != null)
         {
             StopCoroutine(stateRestorationCoroutine);
             stateRestorationCoroutine = null;
         }
-        
+    
         isRestoringState = false;
-        
+    
+        // Clear any win/lose messages
+        if (UIManager.Instance != null && UIManager.Instance.resultText != null)
+        {
+            UIManager.Instance.resultText.gameObject.SetActive(false);
+        }
+    
         // Shutdown the network connection
         NetworkManager.Singleton.Shutdown();
         UpdateStatus("Disconnected. Ready to connect again.");
         UpdateButtonStates(false);
     }
     
+    // Add this method to SimpleUIController.cs to handle reconnection properly
     private IEnumerator DelayedStateRequest()
     {
         Debug.Log("UI: Starting delayed state request for client");
-    
+
         // SAFETY CHECK: Exit immediately if this is or becomes a host or if it should skip
         if (NetworkManager.Singleton.IsHost || WasHostBeforeDisconnect || skipStateRestoration)
         {
@@ -367,10 +470,10 @@ public class SimpleUIController : MonoBehaviour
             stateRestorationCoroutine = null;
             yield break;
         }
-    
+
         // Wait for connection to be established
         yield return new WaitForSeconds(1.0f);
-    
+
         // SAFETY CHECK: Exit if this became a host or if it should skip
         if (NetworkManager.Singleton.IsHost || WasHostBeforeDisconnect || skipStateRestoration)
         {
@@ -379,26 +482,32 @@ public class SimpleUIController : MonoBehaviour
             stateRestorationCoroutine = null;
             yield break;
         }
-    
+
         // If we're a client, proceed with requesting state
         if (NetworkManager.Singleton.IsConnectedClient)
         {
             Debug.Log("UI: Client connection established, requesting game state from server");
             isRestoringState = true;
         
+            // Clear any game end messages
+            if (UIManager.Instance != null)
+            {
+                UIManager.Instance.HideGameEndMessage();
+            }
+
             // Request the game state
             RequestGameStateServerRpc(NetworkManager.Singleton.LocalClientId);
-        
+
             // Wait for the response
             yield return new WaitForSeconds(1.0f);
-        
+
             // Restore the game state (only for client)
             RestoreGameState();
-        
+
             // Reset the flag
             isRestoringState = false;
         }
-    
+
         stateRestorationCoroutine = null;
     }
 
@@ -437,6 +546,12 @@ public class SimpleUIController : MonoBehaviour
                 }
             
                 UpdateStatus($"Game state restored to move {lastMoveIndex}");
+                
+                // After state restoration, update the turn notification
+                if (GameManager.Instance != null)
+                {
+                    UpdateTurnNotification(GameManager.Instance.SideToMove);
+                }
             }
             else
             {
@@ -464,24 +579,58 @@ public class SimpleUIController : MonoBehaviour
             }
         }
         
-        // Update UI with chess network status
-        UpdateStatus(status);
+        // Filter out duplicate turn-related messages
+        if (status.Contains("TURN:") || status.Contains("YOUR TURN") || 
+            status.Contains("WAITING") || status.Contains("move"))
+        {
+            // This is a turn notification, update normally but don't overwrite our own
+            if (!status.Contains("YOUR TURN") && !status.Contains("WAITING"))
+            {
+                UpdateStatus(status);
+            }
+        }
+        else 
+        {
+            // Update UI with chess network status for non-turn-related messages
+            UpdateStatus(status);
+        }
     }
     
     private void OnClientConnected(ulong clientId)
     {
         Debug.Log($"UI detected client connected: {clientId}");
-    
+
         if (clientId == NetworkManager.Singleton.LocalClientId)
         {
             // We connected
             UpdateStatus("Connected to server");
+        
+            // Clear any game end messages
+            if (UIManager.Instance != null)
+            {
+                UIManager.Instance.HideGameEndMessage();
+            }
+        
+            // If we're a client, we need to wait for White's (host's) move
+            if (!NetworkManager.Singleton.IsHost)
+            {
+                UpdateStatus("WAITING: White to move (Host)");
+            }
         }
         else if (NetworkManager.Singleton.IsHost)
         {
             // Someone else connected to us
             UpdateStatus($"Client {clientId} connected. Game ready!");
         
+            // Clear any game end messages
+            if (UIManager.Instance != null)
+            {
+                UIManager.Instance.HideGameEndMessage();
+            }
+        
+            // As the host, indicate it's our turn (White)
+            UpdateStatus("YOUR TURN: White to move (You)");
+    
             // Only capture state if:
             // 1. We don't already have state AND
             // 2. We're in an active game with moves made
@@ -594,5 +743,35 @@ public class SimpleUIController : MonoBehaviour
         {
             statusText.text = message;
         }
+    }
+    
+    // Add this method to SimpleUIController.cs
+
+    /// <summary>
+    /// Called when the resign button is clicked
+    /// </summary>
+    public void OnResignClicked()
+    {
+        Debug.Log("Resign button clicked");
+    
+        // Check if we're in a network game
+        if (NetworkManager.Singleton == null || !NetworkManager.Singleton.IsConnectedClient)
+        {
+            UpdateStatus("Cannot resign: Not in a networked game");
+            return;
+        }
+    
+        // Check if the game is active
+        if (ChessNetworkManager.Instance == null || !ChessNetworkManager.Instance.IsInMultiplayerGame())
+        {
+            UpdateStatus("Cannot resign: Game not active");
+            return;
+        }
+    
+        // Call resign on the ChessNetworkManager
+        ChessNetworkManager.Instance.ResignGame();
+    
+        // Update local status
+        UpdateStatus("You have resigned the game");
     }
 }
