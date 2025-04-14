@@ -117,7 +117,7 @@ public class MultiplayerProfileSync : MonoBehaviour
             Debug.Log($"Profile update event received: {playerId} changed to {skinId}");
         }
         
-        // Update the correct profile image based on who changed
+      
         if (playerId == "Host" && !isHost) // Only update host profile if we're the client
         {
             UpdateProfileImage(hostProfileImage, skinId);

@@ -5,9 +5,7 @@ using UnityChess;
 
 namespace Data
 {
-    /// <summary>
-    /// Extension methods for ChessRelay to add game state synchronization and skin purchase functionality.
-    /// </summary>
+    
     public static class ChessRelayExtension
     {
         /// <summary>

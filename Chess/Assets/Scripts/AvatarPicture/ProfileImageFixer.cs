@@ -3,9 +3,6 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.UI;
 
-/// <summary>
-/// Add this component to ensure profile images are displayed correctly and prevent sync issues
-/// </summary>
 public class ProfileImageFixer : MonoBehaviour
 {
     [Header("References")]
@@ -40,9 +37,7 @@ public class ProfileImageFixer : MonoBehaviour
         StartCoroutine(RefreshProfileImages());
     }
     
-    /// <summary>
-    /// Continuously monitors for profile image changes and ensures they're displayed correctly
-    /// </summary>
+    
     private IEnumerator RefreshProfileImages()
     {
         WaitForSeconds wait = new WaitForSeconds(refreshInterval);
@@ -69,9 +64,7 @@ public class ProfileImageFixer : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Force apply a skin to the appropriate profile image
-    /// </summary>
+    
     public void ApplySkinToImage(string skinId, bool isHostSkin)
     {
         // Choose the correct target image
@@ -121,9 +114,7 @@ public class ProfileImageFixer : MonoBehaviour
         }
     }
     
-    /// <summary>
-    /// Force a refresh of both profile images
-    /// </summary>
+    
     public void ForceRefreshAllProfiles()
     {
         string hostSkin = PlayerPrefs.GetString("Host_CurrentSkin", "default");

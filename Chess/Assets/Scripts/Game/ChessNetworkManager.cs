@@ -104,10 +104,7 @@ public class ChessNetworkManager : NetworkBehaviour
             StartGameClientRpc();
         }
     }
-    
-    /// <summary>
-    /// Called when a client disconnects from the network
-    /// </summary>
+
     /// <summary>
     /// Called when a client disconnects from the network
     /// </summary>
@@ -195,7 +192,7 @@ public class ChessNetworkManager : NetworkBehaviour
            return;
        }
     
-    // Improve reconnection detection for client
+    
     if (!NetworkManager.Singleton.IsHost && skipAutoStartGame)
     {
         Debug.Log("GAME LAUNCH: Client detected during reconnection - waiting for state");
